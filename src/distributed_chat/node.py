@@ -74,7 +74,6 @@ class ChatNode:
             asyncio.create_task(self._heartbeat_loop(), name="heartbeat"),
             asyncio.create_task(self._monitor_loop(), name="monitor"),
             asyncio.create_task(self._bootstrap_election_loop(), name="bootstrap_election"),
-            asyncio.create_task(self._seed_connect_loop(), name="seed_connect"),
         }
         self._emit_status("STARTED", f"Node online at {self.config.host}:{self.config.tcp_port}")
         self.log.info("startup", "Distributed chat node started", uid=self.config.node_uid, priority=self.config.priority)
@@ -265,22 +264,6 @@ class ChatNode:
                     self.discovery_transport.sendto(payload, ("255.255.255.255", self.config.multicast_port))
             await asyncio.sleep(self.config.discovery_interval)
 
-    async def _seed_connect_loop(self) -> None:
-        if not self.config.seed_peers:
-            return
-        while self.running:
-            for host, port in self.config.seed_peers:
-                if not self.running:
-                    break
-                if host == self.config.host and port == self.config.tcp_port:
-                    continue
-                if any(peer.host == host and peer.port == port for peer in self.peers.values()):
-                    continue
-                task = asyncio.create_task(self._connect_to_endpoint(host, port, source="seed"))
-                self.tasks.add(task)
-                task.add_done_callback(self.tasks.discard)
-            await asyncio.sleep(max(self.config.discovery_interval, 3.0))
-
     async def _bootstrap_election_loop(self) -> None:
         await asyncio.sleep(3.0)
         if not self.leader_uid:
@@ -420,6 +403,11 @@ class ChatNode:
                 self.leader_host = str(accept.get("leader_host") or self.leader_host or host)
                 leader_port = accept.get("leader_port")
                 self.leader_port = int(leader_port) if leader_port else self.leader_port
+                leader_name = str(accept.get("username")) if self.leader_uid == peer_uid else "unknown"
+                self._emit_status(
+                    "FOLLOWER",
+                    f"Leader is {leader_name} @ {self.leader_host}:{self.leader_port}",
+                )
             self.log.info("membership", "Connected to peer", peer_uid=peer_uid, host=host, port=port, source=source, room_name=accept.get("room_name"))
             if self.last_delivered_seq + 1 < int(accept.get("next_sequence", self.next_sequence)):
                 await self._request_sync(self.last_delivered_seq + 1)
@@ -515,14 +503,24 @@ class ChatNode:
             return
         if packet_type == "view_update":
             self.view_version = max(self.view_version, int(packet.get("view_version", self.view_version)))
-            self._emit_view(packet.get("members"))
+            members = packet.get("members", [])
+            leader_uid = packet.get("leader_uid")
+            if leader_uid:
+                leader_member = next((member for member in members if member.get("uid") == leader_uid), None)
+                if leader_member:
+                    self.leader_uid = str(leader_uid)
+                    self.leader_host = str(leader_member.get("host"))
+                    self.leader_port = int(leader_member.get("port"))
+                    state = "LEADER" if self.leader_uid == self.config.node_uid else "FOLLOWER"
+                    self._emit_status(state, f"Leader is {leader_member.get('username')} @ {self.leader_host}:{self.leader_port}")
+            self._emit_view(members)
             self._sink({
                 "kind": "event",
                 "timestamp": utc_now(),
                 "level": "INFO",
                 "category": "group_view",
                 "message": f"View v{self.view_version} received",
-                "members": packet.get("members", []),
+                "members": members,
             })
             return
         if packet_type == "goodbye":
@@ -729,10 +727,17 @@ class ChatNode:
         with suppress(Exception):
             await peer.writer.wait_closed()
         self.log.warning("membership", "Peer removed", peer_uid=uid, reason=reason)
+        leader_dropped = uid == self.leader_uid
         if uid == self.leader_uid:
             self.leader_uid = None
             self.leader_host = None
             self.leader_port = None
+            if not self.is_leader and self.running:
+                self._emit_status("FOLLOWER", "Leader lost, starting election")
+                self.log.warning("election", "Leader disconnected, starting election", peer_uid=uid, reason=reason)
+                task = asyncio.create_task(self.initiate_election(reason="leader_disconnected"))
+                self.tasks.add(task)
+                task.add_done_callback(self.tasks.discard)
         if self.is_leader:
             await self._send_view_update()
         self._emit_view()
