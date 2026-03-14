@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import Any
 
-from .config import ChatConfig
+from .config import ChatConfig, parse_seed_peers
 from .gui import launch_gui
 from .node import ChatNode
 
@@ -36,6 +36,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=60000)
     parser.add_argument("--multicast-group", default="239.255.42.99")
     parser.add_argument("--multicast-port", type=int, default=45454)
+    parser.add_argument(
+        "--seed-peer",
+        action="append",
+        default=[],
+        help="Optional fallback peer in host:port format. Repeat or comma-separate values when multicast is unavailable.",
+    )
     parser.add_argument("--priority", type=int, default=ChatConfig().priority)
     args = parser.parse_args()
 
@@ -47,6 +53,7 @@ def main() -> None:
         tcp_port=args.port,
         multicast_group=args.multicast_group,
         multicast_port=args.multicast_port,
+        seed_peers=parse_seed_peers(args.seed_peer),
         priority=args.priority,
     )
     if args.headless:

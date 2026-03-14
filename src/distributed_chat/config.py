@@ -7,6 +7,27 @@ import time
 import uuid
 
 
+def parse_seed_peers(values: str | list[str] | tuple[str, ...] | None) -> tuple[tuple[str, int], ...]:
+    if not values:
+        return ()
+    if isinstance(values, str):
+        raw_items = [item.strip() for item in values.split(",")]
+    else:
+        raw_items = []
+        for value in values:
+            raw_items.extend(part.strip() for part in value.split(","))
+
+    peers: list[tuple[str, int]] = []
+    for item in raw_items:
+        if not item:
+            continue
+        host, separator, port_text = item.rpartition(":")
+        if not separator or not host or not port_text:
+            raise ValueError(f"Seed peer must be in host:port format: {item!r}")
+        peers.append((host.strip(), int(port_text.strip())))
+    return tuple(peers)
+
+
 def detect_host_ip() -> str:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -27,6 +48,7 @@ class ChatConfig:
     tcp_port: int = 60000
     multicast_group: str = "239.255.42.99"
     multicast_port: int = 45454
+    seed_peers: tuple[tuple[str, int], ...] = field(default_factory=tuple)
     discovery_interval: float = 2.0
     heartbeat_interval: float = 1.5
     failure_timeout: float = 6.0
@@ -48,5 +70,6 @@ class ChatConfig:
             tcp_port=int(os.getenv("CHAT_TCP_PORT", "60000")),
             multicast_group=os.getenv("CHAT_MULTICAST_GROUP", "239.255.42.99"),
             multicast_port=int(os.getenv("CHAT_MULTICAST_PORT", "45454")),
+            seed_peers=parse_seed_peers(os.getenv("CHAT_SEED_PEERS")),
             priority=int(os.getenv("CHAT_PRIORITY", str(int(time.time() * 1000) % 1_000_000))),
         )

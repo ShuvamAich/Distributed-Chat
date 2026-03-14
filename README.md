@@ -65,7 +65,9 @@ On each machine:
    - a unique username,
    - the same room name on all machines,
    - the same room password on all machines,
+  - the machine's LAN IP in the **Host** field,
    - a unique TCP port per machine,
+  - if multicast is unreliable, add one reachable node in **Seed Peers** using `host:port`,
    - optionally a different numeric priority.
 4. Click **Start Node**.
 5. Wait for discovery and leader election.
@@ -81,6 +83,7 @@ On each machine:
 Useful for terminals or remote sessions:
 
 - `python run_demo.py --headless --username Alice --password secret --room demo-room --port 60000 --priority 100`
+- `python run_demo.py --headless --username Alice --password secret --room demo-room --host 192.168.1.10 --port 60000 --seed-peer 192.168.1.11:60001 --priority 100`
 
 ## Suggested 3-machine live demo script
 
@@ -95,6 +98,8 @@ Useful for terminals or remote sessions:
 ## Troubleshooting
 
 - If nodes do not discover each other, verify multicast is allowed by the LAN and local firewall.
+- If multicast is blocked, use the seed-peer fallback and point each machine at at least one reachable `host:port` peer.
+- Always use the LAN IP of the machine, not `127.0.0.1` or `localhost`.
 - If a port is already in use, change the TCP port in the GUI.
 - If a node cannot join, verify the room password matches exactly on every machine.
 - If a machine misses a message, the log should show either retransmission or sync recovery.

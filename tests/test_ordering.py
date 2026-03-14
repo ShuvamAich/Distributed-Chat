@@ -9,6 +9,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from distributed_chat.config import parse_seed_peers
 from distributed_chat.order import LamportClock, VectorClock
 
 
@@ -25,6 +26,9 @@ class OrderingTests(unittest.TestCase):
         clock.advance("B")
         self.assertEqual(clock["A"], 1)
         self.assertEqual(clock["B"], 4)
+
+    def test_parse_seed_peers(self) -> None:
+        self.assertEqual(parse_seed_peers("10.0.0.10:6000,10.0.0.11:6001"), (("10.0.0.10", 6000), ("10.0.0.11", 6001)))
 
 
 if __name__ == "__main__":

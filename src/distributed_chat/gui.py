@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any
 
-from .config import ChatConfig
+from .config import ChatConfig, parse_seed_peers
 from .node import ChatNode
 from .order import VectorClock
 
@@ -91,6 +91,7 @@ class ChatApp(tk.Tk):
         self.port_var = tk.StringVar(value="60000")
         self.group_var = tk.StringVar(value="239.255.42.99")
         self.group_port_var = tk.StringVar(value="45454")
+        self.seed_peers_var = tk.StringVar(value="")
         self.priority_var = tk.StringVar(value=str(ChatConfig().priority))
         self.status_var = tk.StringVar(value="Offline")
         self.leader_var = tk.StringVar(value="Leader: unknown")
@@ -112,12 +113,19 @@ class ChatApp(tk.Tk):
             entry.grid(row=1, column=index, sticky="ew", padx=4, pady=6)
             self.entry_widgets.append(entry)
 
+        ttk.Label(config_frame, text="Seed Peers (optional host:port, comma-separated)").grid(
+            row=2, column=0, columnspan=4, sticky="w", padx=4, pady=(0, 0)
+        )
+        seed_entry = ttk.Entry(config_frame, textvariable=self.seed_peers_var)
+        seed_entry.grid(row=3, column=0, columnspan=8, sticky="ew", padx=4, pady=(0, 6))
+        self.entry_widgets.append(seed_entry)
+
         self.start_button = ttk.Button(config_frame, text="Start Node", command=self._start_node)
-        self.start_button.grid(row=2, column=0, columnspan=2, sticky="ew", padx=4, pady=8)
+        self.start_button.grid(row=4, column=0, columnspan=2, sticky="ew", padx=4, pady=8)
         self.stop_button = ttk.Button(config_frame, text="Stop Node", command=self._stop_node, state="disabled")
-        self.stop_button.grid(row=2, column=2, columnspan=2, sticky="ew", padx=4, pady=8)
-        ttk.Label(config_frame, textvariable=self.status_var).grid(row=2, column=4, columnspan=2, sticky="w", padx=4)
-        ttk.Label(config_frame, textvariable=self.leader_var).grid(row=2, column=6, columnspan=2, sticky="w", padx=4)
+        self.stop_button.grid(row=4, column=2, columnspan=2, sticky="ew", padx=4, pady=8)
+        ttk.Label(config_frame, textvariable=self.status_var).grid(row=4, column=4, columnspan=2, sticky="w", padx=4)
+        ttk.Label(config_frame, textvariable=self.leader_var).grid(row=4, column=6, columnspan=2, sticky="w", padx=4)
 
         chat_frame = ttk.LabelFrame(self, text="Ordered Chat")
         chat_frame.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=(0, 12))
@@ -175,6 +183,7 @@ class ChatApp(tk.Tk):
                 tcp_port=int(self.port_var.get()),
                 multicast_group=self.group_var.get().strip() or "239.255.42.99",
                 multicast_port=int(self.group_port_var.get()),
+                seed_peers=parse_seed_peers(self.seed_peers_var.get()),
                 priority=int(self.priority_var.get()),
             )
         except ValueError as exc:
