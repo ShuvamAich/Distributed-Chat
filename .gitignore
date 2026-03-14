@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.log
+*.db
+*.sqlite3
+.venv/
+venv/
+.env
+.vscode/.ropeproject/
+.dist/
+build/
+dist/
+*.egg-info/
