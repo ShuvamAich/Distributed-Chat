@@ -43,7 +43,6 @@ def detect_host_ip() -> str:
 class ChatConfig:
     room_name: str = "demo-room"
     username: str = "user"
-    password: str = "changeme"
     host: str = field(default_factory=detect_host_ip)
     tcp_port: int = 60000
     multicast_group: str = "239.255.42.99"
@@ -65,7 +64,6 @@ class ChatConfig:
         return cls(
             room_name=os.getenv("CHAT_ROOM", "demo-room"),
             username=os.getenv("CHAT_USER", "user"),
-            password=os.getenv("CHAT_PASSWORD", "changeme"),
             host=os.getenv("CHAT_HOST", detect_host_ip()),
             tcp_port=int(os.getenv("CHAT_TCP_PORT", "60000")),
             multicast_group=os.getenv("CHAT_MULTICAST_GROUP", "239.255.42.99"),

@@ -30,7 +30,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Distributed chat demo")
     parser.add_argument("--headless", action="store_true", help="Run without the Tkinter frontend")
     parser.add_argument("--username", default="user")
-    parser.add_argument("--password", default="changeme")
     parser.add_argument("--room", default="demo-room")
     parser.add_argument("--host", default=ChatConfig().host)
     parser.add_argument("--port", type=int, default=60000)
@@ -47,7 +46,6 @@ def main() -> None:
 
     config = ChatConfig(
         username=args.username,
-        password=args.password,
         room_name=args.room,
         host=args.host,
         tcp_port=args.port,

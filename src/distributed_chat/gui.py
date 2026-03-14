@@ -85,7 +85,6 @@ class ChatApp(tk.Tk):
             config_frame.columnconfigure(column, weight=1)
 
         self.username_var = tk.StringVar(value="user")
-        self.password_var = tk.StringVar(value="changeme")
         self.room_var = tk.StringVar(value="demo-room")
         self.host_var = tk.StringVar(value=ChatConfig().host)
         self.port_var = tk.StringVar(value="60000")
@@ -98,7 +97,6 @@ class ChatApp(tk.Tk):
 
         controls = [
             ("Username", self.username_var),
-            ("Password", self.password_var),
             ("Room", self.room_var),
             ("Host", self.host_var),
             ("TCP Port", self.port_var),
@@ -109,7 +107,7 @@ class ChatApp(tk.Tk):
         self.entry_widgets: list[ttk.Entry] = []
         for index, (label, variable) in enumerate(controls):
             ttk.Label(config_frame, text=label).grid(row=0, column=index, sticky="w", padx=4, pady=(6, 0))
-            entry = ttk.Entry(config_frame, textvariable=variable, show="*" if label == "Password" else None)
+            entry = ttk.Entry(config_frame, textvariable=variable)
             entry.grid(row=1, column=index, sticky="ew", padx=4, pady=6)
             self.entry_widgets.append(entry)
 
@@ -177,7 +175,6 @@ class ChatApp(tk.Tk):
         try:
             config = ChatConfig(
                 username=self.username_var.get().strip() or "user",
-                password=self.password_var.get(),
                 room_name=self.room_var.get().strip() or "demo-room",
                 host=self.host_var.get().strip() or ChatConfig().host,
                 tcp_port=int(self.port_var.get()),

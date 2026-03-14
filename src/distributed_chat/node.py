@@ -13,7 +13,6 @@ from .config import ChatConfig
 from .logging_utils import EventLogger
 from .messages import decode_packet, encode_packet, new_message_id, utc_now
 from .order import LamportClock, VectorClock
-from .security import build_join_proof, derive_room_key, generate_nonce, verify_join_proof
 from .state import KnownNode, MessageRecord, PeerConnection
 
 
@@ -37,7 +36,6 @@ class ChatNode:
         self.config = config
         self._sink = event_sink or self._default_sink
         self.log = EventLogger(self._sink)
-        self.room_key = derive_room_key(config.room_name, config.password)
         self.lamport = LamportClock()
         self.vector_clock = VectorClock()
         self.server: asyncio.AbstractServer | None = None
@@ -182,8 +180,6 @@ class ChatNode:
     def on_discovery_datagram(self, message: dict[str, Any], addr: tuple[str, int]) -> None:
         if message.get("type") != "discovery_hello":
             return
-        if message.get("room_name") != self.config.room_name:
-            return
         uid = message.get("uid")
         if not uid or uid == self.config.node_uid:
             return
@@ -320,17 +316,10 @@ class ChatNode:
 
     async def _handle_incoming_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer_uid: str | None = None
-        nonce = generate_nonce()
-        await self._send_packet(writer, {"type": "auth_challenge", "nonce": nonce, "room_name": self.config.room_name})
         try:
             request = await self._read_packet(reader, timeout=10.0)
             if request.get("type") != "join_request":
                 raise ConnectionError("join_request expected")
-            if request.get("room_name") != self.config.room_name:
-                raise ConnectionError("room mismatch")
-            proof = str(request.get("proof", ""))
-            if not verify_join_proof(self.room_key, nonce, proof):
-                raise ConnectionError("invalid password proof")
             peer_uid = str(request["uid"])
             await self._register_peer(
                 uid=peer_uid,
@@ -349,6 +338,7 @@ class ChatNode:
                     "host": self.config.host,
                     "port": self.config.tcp_port,
                     "priority": self.config.priority,
+                    "room_name": self.config.room_name,
                     "leader_uid": self.leader_uid,
                     "leader_host": self.leader_host,
                     "leader_port": self.leader_port,
@@ -357,9 +347,9 @@ class ChatNode:
                     "last_delivered_seq": self.last_delivered_seq,
                 },
             )
-            self.log.info("membership", "Authenticated incoming peer", peer_uid=peer_uid)
+            self.log.info("membership", "Accepted incoming peer", peer_uid=peer_uid, room_name=request.get("room_name"))
             await self._send_view_update()
-            await self._peer_reader_loop(peer_uid, reader)
+            await self._peer_reader_loop(peer_uid, reader, writer)
         except Exception as exc:
             self.log.warning("network", f"Incoming connection closed during setup: {exc}")
             writer.close()
@@ -396,12 +386,6 @@ class ChatNode:
         self._pending_endpoints.add(endpoint)
         try:
             reader, writer = await asyncio.open_connection(host, port)
-            challenge = await self._read_packet(reader, timeout=10.0)
-            if challenge.get("type") != "auth_challenge":
-                raise ConnectionError("auth challenge expected")
-            if challenge.get("room_name") != self.config.room_name:
-                raise ConnectionError("room mismatch during discovery")
-            nonce = str(challenge["nonce"])
             await self._send_packet(
                 writer,
                 {
@@ -409,7 +393,6 @@ class ChatNode:
                     "uid": self.config.node_uid,
                     "username": self.config.username,
                     "room_name": self.config.room_name,
-                    "proof": build_join_proof(self.room_key, nonce),
                     "host": self.config.host,
                     "port": self.config.tcp_port,
                     "priority": self.config.priority,
@@ -437,10 +420,10 @@ class ChatNode:
                 self.leader_host = str(accept.get("leader_host") or self.leader_host or host)
                 leader_port = accept.get("leader_port")
                 self.leader_port = int(leader_port) if leader_port else self.leader_port
-            self.log.info("membership", "Connected to peer", peer_uid=peer_uid, host=host, port=port, source=source)
+            self.log.info("membership", "Connected to peer", peer_uid=peer_uid, host=host, port=port, source=source, room_name=accept.get("room_name"))
             if self.last_delivered_seq + 1 < int(accept.get("next_sequence", self.next_sequence)):
                 await self._request_sync(self.last_delivered_seq + 1)
-            task = asyncio.create_task(self._peer_reader_loop(peer_uid, reader))
+            task = asyncio.create_task(self._peer_reader_loop(peer_uid, reader, writer))
             self.reader_tasks[peer_uid] = task
             task.add_done_callback(lambda _: self.reader_tasks.pop(peer_uid, None))
             await self._send_view_update()
@@ -470,7 +453,7 @@ class ChatNode:
         self.known_nodes[uid] = KnownNode(uid=uid, username=username, host=host, port=port, priority=priority, last_discovered=now, leader_uid=self.leader_uid)
         self._emit_view()
 
-    async def _peer_reader_loop(self, peer_uid: str, reader: asyncio.StreamReader) -> None:
+    async def _peer_reader_loop(self, peer_uid: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             while self.running:
                 packet = await self._read_packet(reader)
@@ -481,7 +464,7 @@ class ChatNode:
         except Exception as exc:
             self.log.warning("network", f"Reader loop failed for {peer_uid}: {exc}")
         finally:
-            await self._drop_peer(peer_uid, "connection_closed")
+            await self._drop_peer(peer_uid, "connection_closed", writer)
 
     async def _handle_packet(self, peer_uid: str, packet: dict[str, Any]) -> None:
         packet_type = packet.get("type")
@@ -727,10 +710,21 @@ class ChatNode:
         for peer in list(self.peers.values()):
             await self._send_packet(peer.writer, packet)
 
-    async def _drop_peer(self, uid: str, reason: str) -> None:
-        peer = self.peers.pop(uid, None)
+    async def _drop_peer(self, uid: str, reason: str, writer: asyncio.StreamWriter | None = None) -> None:
+        peer = self.peers.get(uid)
         if not peer:
+            if writer is not None:
+                writer.close()
+                with suppress(Exception):
+                    await writer.wait_closed()
             return
+        if writer is not None and peer.writer is not writer:
+            writer.close()
+            with suppress(Exception):
+                await writer.wait_closed()
+            self.log.info("membership", "Ignored stale connection close", peer_uid=uid, reason=reason)
+            return
+        self.peers.pop(uid, None)
         peer.writer.close()
         with suppress(Exception):
             await peer.writer.wait_closed()
