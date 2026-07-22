@@ -56,7 +56,7 @@ class ChatNode:
         self.pending_history: dict[int, MessageRecord] = {}
         self.pending_ack_targets: dict[int, set[str]] = defaultdict(set)
         self.delivery_buffer: dict[int, dict[str, Any]] = {}
-        self.last_sync_request_seq = 1
+        self.last_sync_request_seq = 0
         self.last_delivered_seq = 0
         self.next_sequence = 1
         self.view_version = 0
@@ -127,6 +127,9 @@ class ChatNode:
         if not leader:
             self.log.warning("routing", "Leader unavailable, starting election before send")
             await self.initiate_election(reason="send_without_leader")
+            if self.is_leader:
+                await self._accept_chat(packet)
+                return
             leader = self._get_leader_peer()
         if not leader:
             self.log.error("routing", "Unable to send message because no leader is available")
@@ -332,6 +335,7 @@ class ChatNode:
             )
             self.log.info("membership", "Accepted incoming peer", peer_uid=peer_uid, room_name=request.get("room_name"))
             await self._send_view_update()
+            await self._push_history_if_leader(writer, int(request.get("last_delivered_seq", 0)))
             await self._peer_reader_loop(peer_uid, reader, writer)
         except Exception as exc:
             self.log.warning("network", f"Incoming connection closed during setup: {exc}")
@@ -411,6 +415,7 @@ class ChatNode:
             self.log.info("membership", "Connected to peer", peer_uid=peer_uid, host=host, port=port, source=source, room_name=accept.get("room_name"))
             if self.last_delivered_seq + 1 < int(accept.get("next_sequence", self.next_sequence)):
                 await self._request_sync(self.last_delivered_seq + 1)
+            await self._push_history_if_leader(writer, int(accept.get("last_delivered_seq", 0)))
             task = asyncio.create_task(self._peer_reader_loop(peer_uid, reader, writer))
             self.reader_tasks[peer_uid] = task
             task.add_done_callback(lambda _: self.reader_tasks.pop(peer_uid, None))
@@ -582,7 +587,6 @@ class ChatNode:
             self.lamport.tick(observed_lamport)
             self.vector_clock.merge(current.get("vector_clock"))
             self.last_delivered_seq = next_seq
-            self.last_sync_request_seq = self.last_delivered_seq + 1
             self._sink(
                 {
                     "kind": "chat",
@@ -626,6 +630,16 @@ class ChatNode:
         if peer:
             await self._send_packet(peer.writer, {"type": "sync_response", "messages": messages, "timestamp": utc_now()})
             self.log.info("fault_tolerance", "Sent missing messages to recovering peer", peer_uid=peer_uid, from_seq=from_seq, count=len(messages))
+
+    async def _push_history_if_leader(self, writer: asyncio.StreamWriter, peer_last_delivered_seq: int) -> None:
+        if not self.is_leader:
+            return
+        messages = [record.as_packet() for seq, record in sorted(self.pending_history.items()) if seq > peer_last_delivered_seq]
+        if not messages:
+            return
+        with suppress(Exception):
+            await self._send_packet(writer, {"type": "sync_response", "messages": messages, "timestamp": utc_now()})
+            self.log.info("fault_tolerance", "Pushed missing history to new peer", from_seq=peer_last_delivered_seq + 1, count=len(messages))
 
     async def _retransmit_until_acked(self, seq: int) -> None:
         retries = 0

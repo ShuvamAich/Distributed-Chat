@@ -4,7 +4,7 @@
 		{
 			"label": "Validate distributed chat",
 			"type": "shell",
-			"command": "C:/Python312/python.exe",
+			"command": "python",
 			"args": [
 				"-m",
 				"unittest",

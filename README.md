@@ -48,7 +48,7 @@ This keeps message order consistent and allows lagging nodes to catch up.
 ## Requirements
 
 - Python 3.11+
-- Three machines on the same LAN for the full demo
+- Two or more machines on the same LAN (the demo works with any number of nodes)
 - Multicast enabled on the network
 - Same room name on all demo nodes if you want them grouped consistently in the demo
 
@@ -95,7 +95,9 @@ Useful for terminals or remote sessions:
 ## Troubleshooting
 
 - If nodes do not discover each other, verify multicast is allowed by the LAN and local firewall.
-- Always use the LAN IP of the machine, not `127.0.0.1` or `localhost`.
+- On Windows, allow Python through the firewall on **Private networks** the first time you start a node. Both inbound UDP (discovery) and inbound TCP on the chosen port must be permitted, or the second PC cannot connect.
+- If the prompt was dismissed earlier, add an inbound rule for the TCP port (default `60000`) and UDP multicast port (default `45454`), or temporarily allow `python.exe`.
+- Always use the LAN IP of the machine, not `127.0.0.1` or `localhost`. Confirm both PCs are on the same subnet (for example both `192.168.0.x`).
 - If a port is already in use, change the TCP port in the GUI.
 - If a node cannot join, verify the TCP ports are reachable across the LAN and the machines are on the same subnet.
 - If a machine misses a message, the log should show either retransmission or sync recovery.
